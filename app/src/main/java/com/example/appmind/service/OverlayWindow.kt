@@ -28,8 +28,10 @@ class OverlayWindow(
 
     fun show() {
         if (isDismissed) return
-        mainHandler.post {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
             showInternal()
+        } else {
+            mainHandler.post { showInternal() }
         }
     }
 
@@ -61,14 +63,10 @@ class OverlayWindow(
 
             windowManager?.addView(layout, params)
 
-            // Request focus after adding
-            mainHandler.postDelayed({
-                try {
-                    val input = layout.findViewById<EditText>(inputFieldId)
-                    input?.requestFocus()
-                    // Don't auto-show keyboard - let user tap
-                } catch (_: Exception) {}
-            }, 100)
+            try {
+                val input = layout.findViewById<EditText>(inputFieldId)
+                input?.requestFocus()
+            } catch (_: Exception) {}
         } catch (e: Exception) {
             e.printStackTrace()
             dismiss()
