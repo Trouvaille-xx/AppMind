@@ -1,7 +1,9 @@
 package com.example.appmind.data.repository
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import com.example.appmind.data.AppDatabase
 import com.example.appmind.data.entity.AppLog
 import com.example.appmind.data.entity.MonitoredApp
@@ -19,17 +21,55 @@ class AppRepository(private val context: Context) {
     // ========================
 
     fun getInstalledApps(): List<AppInfo> {
-        return packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { it.packageName != context.packageName }
-            .filter { packageManager.getLaunchIntentForPackage(it.packageName) != null }
-            .map {
-                AppInfo(
-                    packageName = it.packageName,
-                    appName = packageManager.getApplicationLabel(it).toString(),
-                    icon = packageManager.getApplicationIcon(it)
-                )
-            }
+        val apps = getInstalledAppsByQuery() + getInstalledAppsByPackageManager()
+        return apps
+            .distinctBy { it.packageName }
             .sortedBy { it.appName.lowercase() }
+    }
+
+    private fun getInstalledAppsByQuery(): List<AppInfo> {
+        val mainIntent = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
+        return try {
+            val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                @Suppress("InlinedApi")
+                packageManager.queryIntentActivities(
+                    mainIntent,
+                    PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL)
+            }
+            resolveInfos
+                .filter { it.activityInfo.packageName != context.packageName }
+                .map { info ->
+                    AppInfo(
+                        packageName = info.activityInfo.packageName,
+                        appName = info.loadLabel(packageManager).toString(),
+                        icon = info.loadIcon(packageManager)
+                    )
+                }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun getInstalledAppsByPackageManager(): List<AppInfo> {
+        val flags = PackageManager.GET_META_DATA or
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) PackageManager.MATCH_ALL else 0
+        return try {
+            packageManager.getInstalledApplications(flags)
+                .filter { it.packageName != context.packageName }
+                .map {
+                    AppInfo(
+                        packageName = it.packageName,
+                        appName = packageManager.getApplicationLabel(it).toString(),
+                        icon = packageManager.getApplicationIcon(it)
+                    )
+                }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     // ========================
