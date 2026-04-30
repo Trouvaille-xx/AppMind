@@ -7,7 +7,7 @@ import com.example.appmind.data.entity.AppLog
 import com.example.appmind.data.entity.MonitoredApp
 import kotlinx.coroutines.flow.Flow
 
-class AppRepository(context: Context) {
+class AppRepository(private val context: Context) {
 
     private val db = AppDatabase.getInstance(context)
     private val monitoredAppDao = db.monitoredAppDao()

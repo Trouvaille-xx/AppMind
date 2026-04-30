@@ -70,10 +70,9 @@ class OverlayWindow(
             setBackgroundColor(Color.WHITE)
             setPadding(40, 40, 40, 40)
             gravity = Gravity.CENTER_HORIZONTAL
-            val cornerRadius = 24f
             val drawable = android.graphics.drawable.GradientDrawable().apply {
                 setColor(Color.WHITE)
-                cornerRadius = cornerRadius
+                cornerRadius = 24f
             }
             background = drawable
             elevation = 12f
