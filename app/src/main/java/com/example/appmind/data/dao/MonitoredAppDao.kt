@@ -17,6 +17,9 @@ interface MonitoredAppDao {
     @Query("SELECT * FROM monitored_apps WHERE is_monitored = 1")
     fun getMonitoredApps(): Flow<List<MonitoredApp>>
 
+    @Query("SELECT * FROM monitored_apps WHERE is_monitored = 1")
+    suspend fun getMonitoredAppsList(): List<MonitoredApp>
+
     @Query("SELECT * FROM monitored_apps WHERE package_name = :packageName")
     suspend fun getByPackageName(packageName: String): MonitoredApp?
 

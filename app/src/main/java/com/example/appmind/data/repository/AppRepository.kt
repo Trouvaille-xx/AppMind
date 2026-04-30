@@ -80,6 +80,8 @@ class AppRepository(private val context: Context) {
 
     fun getMonitoredApps(): Flow<List<MonitoredApp>> = monitoredAppDao.getMonitoredApps()
 
+    suspend fun getMonitoredAppList(): List<MonitoredApp> = monitoredAppDao.getMonitoredAppsList()
+
     suspend fun getByPackageName(packageName: String): MonitoredApp? =
         monitoredAppDao.getByPackageName(packageName)
 

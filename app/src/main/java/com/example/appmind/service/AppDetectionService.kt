@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import com.example.appmind.data.entity.AppLog
+import com.example.appmind.data.entity.MonitoredApp
 import com.example.appmind.data.repository.AppRepository
 import kotlinx.coroutines.*
 
@@ -17,6 +18,9 @@ class AppDetectionService : AccessibilityService() {
     private var isShowing = false
     private var lastShownPackage: String? = null
 
+    // Fast-path: in-memory cache of monitored packages
+    private val monitoredCache = mutableMapOf<String, MonitoredApp>()
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         serviceInfo = AccessibilityServiceInfo().apply {
@@ -26,30 +30,49 @@ class AppDetectionService : AccessibilityService() {
             flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
                     AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         }
+        refreshCache()
+    }
+
+    private fun refreshCache() {
+        scope.launch {
+            try {
+                val repo = AppRepository(applicationContext)
+                val apps = repo.getMonitoredAppList()
+                monitoredCache.clear()
+                apps.forEach { monitoredCache[it.packageName] = it }
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
 
         val eventPackage = event.packageName?.toString()?.takeIf { it.isNotEmpty() } ?: return
-
-        // Ignore events from our own app
         if (eventPackage == packageName) return
-
-        // Debounce: don't fire for same package while overlay is showing
         if (isShowing && eventPackage == lastShownPackage) return
 
-        // Check on IO thread (DB query), then show on Main thread
+        // Fast path: check in-memory cache synchronously
+        val cached = monitoredCache[eventPackage]
+        if (cached != null && cached.isMonitored) {
+            val defaultQ = cached.customQuestion?.takeIf { it.isNotBlank() }
+                ?: AppRepository(applicationContext).getDefaultQuestion(applicationContext)
+            mainHandler.post {
+                showOverlay(cached.appName, eventPackage, defaultQ)
+            }
+            return
+        }
+
+        // Slow path: DB fallback for any missed packages
         scope.launch {
             try {
-                val repository = AppRepository(applicationContext)
-                val app = repository.getByPackageName(eventPackage) ?: return@launch
+                val repo = AppRepository(applicationContext)
+                val app = repo.getByPackageName(eventPackage) ?: return@launch
                 if (!app.isMonitored) return@launch
+                monitoredCache[eventPackage] = app
 
-                val defaultQ = repository.getDefaultQuestion(applicationContext)
+                val defaultQ = repo.getDefaultQuestion(applicationContext)
                 val q = app.customQuestion?.takeIf { it.isNotBlank() } ?: defaultQ
 
-                // Switch to main thread for UI - show immediately
                 withContext(Dispatchers.Main) {
                     if (isShowing) return@withContext
                     showOverlay(app.appName, eventPackage, q)
@@ -71,8 +94,7 @@ class AppDetectionService : AccessibilityService() {
             onConfirm = { answer ->
                 scope.launch {
                     try {
-                        val repo = AppRepository(applicationContext)
-                        repo.insertLog(
+                        AppRepository(applicationContext).insertLog(
                             AppLog(
                                 packageName = packageName,
                                 appName = appName,
@@ -88,8 +110,7 @@ class AppDetectionService : AccessibilityService() {
             onCancel = {
                 scope.launch {
                     try {
-                        val repo = AppRepository(applicationContext)
-                        repo.insertLog(
+                        AppRepository(applicationContext).insertLog(
                             AppLog(
                                 packageName = packageName,
                                 appName = appName,
@@ -101,7 +122,6 @@ class AppDetectionService : AccessibilityService() {
                     } catch (_: Exception) {}
                 }
                 dismissAndReset()
-                // Go home after cancel (with delay to let dismiss complete)
                 mainHandler.postDelayed({
                     try {
                         performGlobalAction(GLOBAL_ACTION_HOME)
@@ -110,6 +130,10 @@ class AppDetectionService : AccessibilityService() {
             }
         )
         overlayWindow?.show()
+    }
+
+    fun notifyMonitoredChanged() {
+        refreshCache()
     }
 
     private fun dismissAndReset() {
