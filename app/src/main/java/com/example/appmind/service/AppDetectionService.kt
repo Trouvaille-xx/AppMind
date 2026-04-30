@@ -2,8 +2,8 @@ package com.example.appmind.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
-import android.content.Context
-import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import com.example.appmind.data.entity.AppLog
 import com.example.appmind.data.repository.AppRepository
@@ -11,113 +11,121 @@ import kotlinx.coroutines.*
 
 class AppDetectionService : AccessibilityService() {
 
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var overlayWindow: OverlayWindow? = null
-    private var currentPackage: String? = null
-    private var isOverlayShowing = false
+    private var isShowing = false
+    private var lastShownPackage: String? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        val info = AccessibilityServiceInfo().apply {
+        serviceInfo = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             notificationTimeout = 100
             flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
                     AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         }
-        serviceInfo = info
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
 
-        val packageName = event.packageName?.toString() ?: return
-        if (packageName == this@AppDetectionService.packageName) return // ignore own app
+        val eventPackage = event.packageName?.toString()?.takeIf { it.isNotEmpty() } ?: return
 
-        // Avoid processing same package repeatedly while overlay is showing
-        if (packageName == currentPackage && isOverlayShowing) return
+        // Ignore events from our own app
+        if (eventPackage == packageName) return
 
-        serviceScope.launch {
-            checkAndShowOverlay(packageName)
-        }
-    }
+        // Debounce: don't fire for same package while overlay is showing
+        if (isShowing && eventPackage == lastShownPackage) return
 
-    private suspend fun checkAndShowOverlay(packageName: String) {
-        val repository = AppRepository(applicationContext)
-        val monitoredApp = repository.getByPackageName(packageName) ?: return
+        // Check on IO thread (DB query), then show on Main thread
+        scope.launch {
+            try {
+                val repository = AppRepository(applicationContext)
+                val app = repository.getByPackageName(eventPackage) ?: return@launch
+                if (!app.isMonitored) return@launch
 
-        if (!monitoredApp.isMonitored) return
-        if (isOverlayShowing) return
+                val defaultQ = repository.getDefaultQuestion(applicationContext)
+                val q = app.customQuestion?.takeIf { it.isNotBlank() } ?: defaultQ
 
-        val defaultQuestion = repository.getDefaultQuestion(applicationContext)
-        val question = monitoredApp.customQuestion?.takeIf { it.isNotBlank() } ?: defaultQuestion
-
-        currentPackage = packageName
-        isOverlayShowing = true
-
-        withContext(Dispatchers.Main) {
-            showOverlay(monitoredApp.appName, packageName, question)
+                // Switch to main thread for UI
+                withContext(Dispatchers.Main) {
+                    if (isShowing) return@withContext
+                    showOverlay(app.appName, eventPackage, q)
+                }
+            } catch (_: Exception) {}
         }
     }
 
     private fun showOverlay(appName: String, packageName: String, question: String) {
+        if (isShowing) return
+
+        isShowing = true
+        lastShownPackage = packageName
+
         overlayWindow = OverlayWindow(
             context = this,
             appName = appName,
             question = question,
             onConfirm = { answer ->
-                serviceScope.launch {
-                    val repository = AppRepository(applicationContext)
-                    repository.insertLog(
-                        AppLog(
-                            packageName = packageName,
-                            appName = appName,
-                            question = question,
-                            answer = answer,
-                            action = "confirmed"
+                scope.launch {
+                    try {
+                        val repo = AppRepository(applicationContext)
+                        repo.insertLog(
+                            AppLog(
+                                packageName = packageName,
+                                appName = appName,
+                                question = question,
+                                answer = answer,
+                                action = "confirmed"
+                            )
                         )
-                    )
+                    } catch (_: Exception) {}
                 }
-                dismissOverlay()
+                dismissAndReset()
             },
             onCancel = {
-                serviceScope.launch {
-                    val repository = AppRepository(applicationContext)
-                    repository.insertLog(
-                        AppLog(
-                            packageName = packageName,
-                            appName = appName,
-                            question = question,
-                            answer = "",
-                            action = "cancelled"
+                scope.launch {
+                    try {
+                        val repo = AppRepository(applicationContext)
+                        repo.insertLog(
+                            AppLog(
+                                packageName = packageName,
+                                appName = appName,
+                                question = question,
+                                answer = "",
+                                action = "cancelled"
+                            )
                         )
-                    )
+                    } catch (_: Exception) {}
                 }
-                dismissOverlay()
-                performGlobalAction(GLOBAL_ACTION_BACK)
-                serviceScope.launch {
-                    delay(200)
-                    withContext(Dispatchers.Main) {
+                dismissAndReset()
+                // Go home after cancel (with delay to let dismiss complete)
+                mainHandler.postDelayed({
+                    try {
                         performGlobalAction(GLOBAL_ACTION_HOME)
-                    }
-                }
+                    } catch (_: Exception) {}
+                }, 300)
             }
         )
         overlayWindow?.show()
     }
 
-    private fun dismissOverlay() {
+    private fun dismissAndReset() {
         overlayWindow?.dismiss()
         overlayWindow = null
-        currentPackage = null
-        isOverlayShowing = false
+        isShowing = false
+        lastShownPackage = null
     }
 
-    override fun onInterrupt() {}
+    override fun onInterrupt() {
+        dismissAndReset()
+    }
 
     override fun onDestroy() {
-        serviceScope.cancel()
-        overlayWindow?.dismiss()
+        scope.cancel()
+        dismissAndReset()
         super.onDestroy()
     }
 }
