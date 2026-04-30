@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">AppMind</string>
+    <string name="service_description">
+        用于检测应用启动，在你打开被监控的应用时弹出问题提醒。
+        不会收集或上传任何个人数据，所有记录仅保存在本地。
+    </string>
+</resources>
