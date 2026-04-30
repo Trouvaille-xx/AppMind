@@ -41,16 +41,22 @@ class OverlayWindow(
             overlayView = layout
 
             val params = WindowManager.LayoutParams().apply {
-                type = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+                type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WindowManager.LayoutParams.TYPE_PHONE
+                }
                 flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                         WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
                 format = PixelFormat.TRANSLUCENT
                 width = WindowManager.LayoutParams.MATCH_PARENT
                 height = WindowManager.LayoutParams.MATCH_PARENT
                 gravity = Gravity.CENTER
-                softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
+                softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
             }
 
             windowManager?.addView(layout, params)
@@ -87,11 +93,10 @@ class OverlayWindow(
     private fun createOverlayLayout(): android.widget.FrameLayout {
         val root = android.widget.FrameLayout(context).apply {
             setBackgroundColor(Color.parseColor("#99000000"))
-            isClickable = true
-            isFocusable = true
+            isClickable = false
+            isFocusable = false
             // Tap outside card to cancel
             setOnClickListener {
-                dismiss()
                 onCancel()
             }
         }
@@ -218,17 +223,6 @@ class OverlayWindow(
         )
         cardLp.gravity = Gravity.CENTER
         root.addView(card, cardLp)
-
-        // Catch key events for back button
-        root.isFocusableInTouchMode = true
-        root.requestFocus()
-        root.setOnKeyListener { _, keyCode, event ->
-            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                dismiss()
-                onCancel()
-                true
-            } else false
-        }
 
         return root
     }

@@ -49,6 +49,9 @@ class AppDetectionService : AccessibilityService() {
                 val defaultQ = repository.getDefaultQuestion(applicationContext)
                 val q = app.customQuestion?.takeIf { it.isNotBlank() } ?: defaultQ
 
+                // Small delay to let target app finish launching before overlay
+                delay(150)
+
                 // Switch to main thread for UI
                 withContext(Dispatchers.Main) {
                     if (isShowing) return@withContext
