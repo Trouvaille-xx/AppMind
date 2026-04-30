@@ -52,8 +52,7 @@ class OverlayWindow(
                 flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                         WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                 format = PixelFormat.TRANSLUCENT
                 width = WindowManager.LayoutParams.MATCH_PARENT
                 height = WindowManager.LayoutParams.MATCH_PARENT
@@ -91,8 +90,9 @@ class OverlayWindow(
     private fun createOverlayLayout(): android.widget.FrameLayout {
         val root = android.widget.FrameLayout(context).apply {
             setBackgroundColor(Color.parseColor("#99000000"))
-            isClickable = false
-            isFocusable = false
+            isClickable = true
+            isFocusable = true
+            isFocusableInTouchMode = true
             // Tap outside card to cancel
             setOnClickListener {
                 onCancel()

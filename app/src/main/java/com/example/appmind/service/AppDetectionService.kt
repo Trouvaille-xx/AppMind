@@ -88,7 +88,7 @@ class AppDetectionService : AccessibilityService() {
         lastShownPackage = packageName
 
         overlayWindow = OverlayWindow(
-            context = this,
+            context = applicationContext,
             appName = appName,
             question = question,
             onConfirm = { answer ->
